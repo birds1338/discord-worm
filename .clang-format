@@ -1,0 +1,8 @@
+ColumnLimit: '128'
+IndentCaseLabels: 'true'
+IndentWidth: '4'
+CompactNamespaces: 'false'
+NamespaceIndentation: All
+Standard: Auto
+TabWidth: '4'
+UseTab: Always 

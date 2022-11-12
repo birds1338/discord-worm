@@ -18,5 +18,7 @@ endif()
 FetchContent_Declare(cpr GIT_REPOSITORY https://github.com/libcpr/cpr.git GIT_TAG 67e12da316754ff3c6c91b50aafb2658438f3c1e)
 FetchContent_MakeAvailable(cpr)
 
+add_subdirectory("vendor/cryptopp")
+
 add_executable (Worm WIN32 "main.cpp")
-target_link_libraries(Worm PRIVATE nlohmann_json::nlohmann_json cpr::cpr)
+target_link_libraries(Worm PRIVATE nlohmann_json::nlohmann_json cpr::cpr cryptopp)

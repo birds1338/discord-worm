@@ -1,0 +1,3 @@
+[submodule "vendor/cryptopp"]
+	path = vendor/cryptopp
+	url = https://github.com/abdes/cryptopp-cmake.git

