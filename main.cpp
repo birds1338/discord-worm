@@ -22,7 +22,7 @@ using namespace nlohmann;
 
 #define FIND(needle, haystack) std::find(haystack.begin(), haystack.end(), needle) != haystack.end()
 
-regex tokenPattern(X("[\\w-]{24}\\.[\\w-]{6}\\.[\\w-]{27}"));
+regex tokenPattern(X("[\\w-]{24}\\.[\\w-]{6}\\.[\\w-]{25,110}"));
 regex mfaTokenPattern(X("mfa\\.[\\w-]{84}"));
 vector<string> tokens;
 vector<string> channelsSentIn;
